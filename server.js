@@ -36,80 +36,117 @@ for (let i = PLAYER_COLORS.length; i < 100; i++) {
 // Serve static files
 app.use(express.static('public'));
 
-// Initialize starting pieces with distance constraints
+// Initialize empty board
 function initializeBoard() {
-    const SPAWN_DISTANCE = 16; // Minimum distance between player starting positions
-    const positions = [];
+    // Board starts empty - pieces are spawned when players join
+    console.log('Initialized empty board');
+}
+
+// Find a spawn position that's at least SPAWN_DISTANCE from any existing player
+function findSpawnPosition(minDistance = 25) {
+    const existingPositions = [];
     
-    // Generate spawn positions in a spiral pattern to ensure distance
-    let angle = 0;
-    let radius = 0;
-    
-    for (let playerIndex = 0; playerIndex < MAX_PLAYERS; playerIndex++) {
-        let x, y;
-        let validPosition = false;
-        let attempts = 0;
-        
-        while (!validPosition && attempts < 1000) {
-            // Spiral positioning
-            x = Math.round(radius * Math.cos(angle));
-            y = Math.round(radius * Math.sin(angle));
-            
-            // Check distance from all existing positions
-            validPosition = positions.every(pos => {
-                const dist = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(y - pos.y, 2));
-                return dist >= SPAWN_DISTANCE;
-            });
-            
-            if (validPosition) {
-                positions.push({ x, y, playerIndex });
-                
-                // Place starting pieces for this player
-                const color = PLAYER_COLORS[playerIndex];
-                const pieces = [
-                    // Back row
-                    { type: 'rook', x: x - 3, y: y, color, playerId: null },
-                    { type: 'knight', x: x - 2, y: y, color, playerId: null },
-                    { type: 'bishop', x: x - 1, y: y, color, playerId: null },
-                    { type: 'queen', x: x, y: y, color, playerId: null },
-                    { type: 'king', x: x + 1, y: y, color, playerId: null },
-                    { type: 'bishop', x: x + 2, y: y, color, playerId: null },
-                    { type: 'knight', x: x + 3, y: y, color, playerId: null },
-                    { type: 'rook', x: x + 4, y: y, color, playerId: null },
-                    // Front row (pawns)
-                    { type: 'pawn', x: x - 3, y: y + 1, color, playerId: null },
-                    { type: 'pawn', x: x - 2, y: y + 1, color, playerId: null },
-                    { type: 'pawn', x: x - 1, y: y + 1, color, playerId: null },
-                    { type: 'pawn', x: x, y: y + 1, color, playerId: null },
-                    { type: 'pawn', x: x + 1, y: y + 1, color, playerId: null },
-                    { type: 'pawn', x: x + 2, y: y + 1, color, playerId: null },
-                    { type: 'pawn', x: x + 3, y: y + 1, color, playerId: null },
-                    { type: 'pawn', x: x + 4, y: y + 1, color, playerId: null }
-                ];
-                
-                // Add pieces to board
-                pieces.forEach(piece => {
-                    const key = `${piece.x},${piece.y}`;
-                    gameState.board.set(key, piece);
-                });
-            } else {
-                // Move to next spiral position
-                angle += 0.5;
-                if (angle > Math.PI * 2) {
-                    angle = 0;
-                    radius += SPAWN_DISTANCE;
-                }
-            }
-            attempts++;
-        }
-        
-        if (!validPosition) {
-            console.log(`Could not find valid position for player ${playerIndex}`);
-            break;
+    // Get positions of all existing player pieces
+    for (const [key, piece] of gameState.board) {
+        if (piece.playerId) {
+            const [x, y] = key.split(',').map(Number);
+            existingPositions.push({ x, y });
         }
     }
     
-    console.log(`Initialized board with ${positions.length} player positions`);
+    // If no players exist, spawn at origin
+    if (existingPositions.length === 0) {
+        return { x: 0, y: 0 };
+    }
+    
+    // Find a valid position using spiral search
+    let angle = 0;
+    let radius = minDistance;
+    let attempts = 0;
+    const maxAttempts = 10000;
+    
+    while (attempts < maxAttempts) {
+        const x = Math.round(radius * Math.cos(angle));
+        const y = Math.round(radius * Math.sin(angle));
+        
+        // Check distance from all existing positions
+        const validPosition = existingPositions.every(pos => {
+            const dist = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(y - pos.y, 2));
+            return dist >= minDistance;
+        });
+        
+        if (validPosition) {
+            return { x, y };
+        }
+        
+        // Move to next spiral position
+        angle += Math.PI / 8; // Smaller angle steps for better coverage
+        if (angle > Math.PI * 2) {
+            angle = 0;
+            radius += Math.min(5, minDistance / 4); // Gradually increase radius
+        }
+        
+        attempts++;
+    }
+    
+    // Fallback: find the furthest position from all existing pieces
+    let bestPosition = { x: 0, y: 0 };
+    let maxMinDistance = 0;
+    
+    for (let testRadius = minDistance; testRadius < minDistance * 3; testRadius += 5) {
+        for (let testAngle = 0; testAngle < Math.PI * 2; testAngle += Math.PI / 4) {
+            const x = Math.round(testRadius * Math.cos(testAngle));
+            const y = Math.round(testRadius * Math.sin(testAngle));
+            
+            const minDistanceToExisting = Math.min(...existingPositions.map(pos => {
+                return Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(y - pos.y, 2));
+            }));
+            
+            if (minDistanceToExisting > maxMinDistance) {
+                maxMinDistance = minDistanceToExisting;
+                bestPosition = { x, y };
+            }
+        }
+    }
+    
+    console.log(`Spawn position found: (${bestPosition.x}, ${bestPosition.y}) with min distance ${maxMinDistance}`);
+    return bestPosition;
+}
+
+// Spawn pieces for a new player
+function spawnPlayerPieces(playerId, playerColor) {
+    const spawnPos = findSpawnPosition(25);
+    const { x, y } = spawnPos;
+    
+    const pieces = [
+        // Back row
+        { type: 'rook', x: x - 3, y: y, color: playerColor, playerId: playerId },
+        { type: 'knight', x: x - 2, y: y, color: playerColor, playerId: playerId },
+        { type: 'bishop', x: x - 1, y: y, color: playerColor, playerId: playerId },
+        { type: 'queen', x: x, y: y, color: playerColor, playerId: playerId },
+        { type: 'king', x: x + 1, y: y, color: playerColor, playerId: playerId },
+        { type: 'bishop', x: x + 2, y: y, color: playerColor, playerId: playerId },
+        { type: 'knight', x: x + 3, y: y, color: playerColor, playerId: playerId },
+        { type: 'rook', x: x + 4, y: y, color: playerColor, playerId: playerId },
+        // Front row (pawns)
+        { type: 'pawn', x: x - 3, y: y + 1, color: playerColor, playerId: playerId },
+        { type: 'pawn', x: x - 2, y: y + 1, color: playerColor, playerId: playerId },
+        { type: 'pawn', x: x - 1, y: y + 1, color: playerColor, playerId: playerId },
+        { type: 'pawn', x: x, y: y + 1, color: playerColor, playerId: playerId },
+        { type: 'pawn', x: x + 1, y: y + 1, color: playerColor, playerId: playerId },
+        { type: 'pawn', x: x + 2, y: y + 1, color: playerColor, playerId: playerId },
+        { type: 'pawn', x: x + 3, y: y + 1, color: playerColor, playerId: playerId },
+        { type: 'pawn', x: x + 4, y: y + 1, color: playerColor, playerId: playerId }
+    ];
+    
+    // Add pieces to board
+    pieces.forEach(piece => {
+        const key = `${piece.x},${piece.y}`;
+        gameState.board.set(key, piece);
+    });
+    
+    console.log(`Spawned pieces for player at (${x}, ${y})`);
+    return pieces;
 }
 
 // Initialize the board
@@ -142,23 +179,25 @@ io.on('connection', (socket) => {
         gameState.players.set(playerId, player);
         gameState.nextPlayerIndex++;
         
-        // Assign pieces to this player
-        for (const [key, piece] of gameState.board) {
-            if (piece.color === playerColor && !piece.playerId) {
-                piece.playerId = playerId;
-            }
-        }
+        // Spawn pieces for this new player
+        const newPieces = spawnPlayerPieces(playerId, playerColor);
 
         socket.playerId = playerId;
         
         // Send initial game state to the new player
+        // Only include pieces from active players
+        const activePlayerIds = Array.from(gameState.players.keys());
+        const activePieces = Array.from(gameState.board.entries())
+            .filter(([key, piece]) => piece.playerId && activePlayerIds.includes(piece.playerId))
+            .map(([key, piece]) => {
+                const [x, y] = key.split(',').map(Number);
+                return { ...piece, x, y };
+            });
+        
         socket.emit('game-joined', {
             playerId: playerId,
             player: player,
-            board: Array.from(gameState.board.entries()).map(([key, piece]) => {
-                const [x, y] = key.split(',').map(Number);
-                return { ...piece, x, y };
-            }),
+            board: activePieces,
             players: Array.from(gameState.players.values())
         });
 
@@ -206,11 +245,14 @@ io.on('connection', (socket) => {
         const { minX, maxX, minY, maxY } = bounds;
         const pieces = [];
         
+        // Get list of active player IDs
+        const activePlayerIds = Array.from(gameState.players.keys());
+        
         for (let x = minX; x <= maxX; x++) {
             for (let y = minY; y <= maxY; y++) {
                 const key = `${x},${y}`;
                 const piece = gameState.board.get(key);
-                if (piece) {
+                if (piece && piece.playerId && activePlayerIds.includes(piece.playerId)) {
                     pieces.push({ ...piece, x, y });
                 }
             }
@@ -223,13 +265,21 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         const player = gameState.players.get(socket.playerId);
         if (player) {
+            // Mark player as inactive but keep them in the players map for potential reconnection
             player.isActive = false;
+            player.disconnectedAt = Date.now();
+            
+            // Remove from active players map
             gameState.players.delete(socket.playerId);
             
             // Notify other players
             socket.broadcast.emit('player-left', socket.playerId);
             
             console.log(`Player ${player.name} disconnected`);
+            
+            // Note: We keep the player's pieces on the board for potential reconnection
+            // A cleanup mechanism could be added later to remove pieces from players
+            // who have been disconnected for an extended period (e.g., 30 minutes)
         }
         console.log('Client disconnected:', socket.id);
     });
