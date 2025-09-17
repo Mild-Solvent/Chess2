@@ -133,6 +133,13 @@ class Chess2App {
         this.socket.on('invalid-move', (message) => {
             this.showToast(message, 'error');
         });
+        
+        this.socket.on('move-on-cooldown', (data) => {
+            this.showToast(data.message, 'warning');
+            if (this.gameBoard) {
+                this.gameBoard.startCooldown(data.remainingMs);
+            }
+        });
 
         this.socket.on('board-section', (data) => {
             if (this.gameBoard) {

@@ -10,13 +10,15 @@ const io = socketIo(server);
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 100;
+const MOVE_COOLDOWN_MS = 3000; // 3 seconds cooldown between moves
 
 // Game state
 const gameState = {
     players: new Map(),
     board: new Map(), // Infinite board using coordinate strings as keys
     playerColors: [],
-    nextPlayerIndex: 0
+    nextPlayerIndex: 0,
+    playerCooldowns: new Map() // Track last move time for each player
 };
 
 // Chess piece colors for up to 100 players
@@ -223,12 +225,29 @@ io.on('connection', (socket) => {
             socket.emit('invalid-move', 'Not your piece');
             return;
         }
+        
+        // Check cooldown
+        const now = Date.now();
+        const lastMoveTime = gameState.playerCooldowns.get(player.id) || 0;
+        const timeSinceLastMove = now - lastMoveTime;
+        
+        if (timeSinceLastMove < MOVE_COOLDOWN_MS) {
+            const remainingCooldown = MOVE_COOLDOWN_MS - timeSinceLastMove;
+            socket.emit('move-on-cooldown', {
+                message: `You must wait ${Math.ceil(remainingCooldown / 1000)} seconds before making another move`,
+                remainingMs: remainingCooldown
+            });
+            return;
+        }
 
         // Move piece
         gameState.board.delete(fromKey);
         piece.x = toX;
         piece.y = toY;
         gameState.board.set(toKey, piece);
+        
+        // Record the move time for cooldown tracking
+        gameState.playerCooldowns.set(player.id, now);
 
         // Broadcast move to all players
         io.emit('piece-moved', {

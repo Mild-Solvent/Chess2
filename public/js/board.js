@@ -26,6 +26,11 @@ class GameBoard {
         this.lastMouseX = 0;
         this.lastMouseY = 0;
         
+        // Cooldown state
+        this.isOnCooldown = false;
+        this.cooldownEndTime = 0;
+        this.cooldownTimer = null;
+        
         // Chess piece symbols (Unicode)
         this.pieceSymbols = {
             king: '♔',
@@ -138,7 +143,13 @@ class GameBoard {
         const piece = this.getPieceAt(boardPos.x, boardPos.y);
         
         if (e.button === 0) { // Left click
-            if (piece && piece.playerId === this.player.id) {
+            if (this.isOnCooldown) {
+                // Show cooldown message if trying to interact during cooldown
+                const remainingSeconds = Math.ceil(this.getRemainingCooldownMs() / 1000);
+                if (window.chess2App) {
+                    window.chess2App.showToast(`Wait ${remainingSeconds} seconds before making another move`, 'warning');
+                }
+            } else if (piece && piece.playerId === this.player.id) {
                 // Select own piece
                 this.selectPiece(piece, boardPos.x, boardPos.y);
             } else if (this.selectedPiece) {
@@ -362,7 +373,7 @@ class GameBoard {
     }
     
     handlePieceMoved(moveData) {
-        const { fromX, fromY, toX, toY, piece } = moveData;
+        const { fromX, fromY, toX, toY, piece, playerId } = moveData;
         
         // Remove piece from old position
         const fromKey = `${fromX},${fromY}`;
@@ -372,7 +383,49 @@ class GameBoard {
         const toKey = `${toX},${toY}`;
         this.pieces.set(toKey, piece);
         
+        // If it's our move, start cooldown
+        if (playerId === this.player.id) {
+            this.startCooldown(3000); // 3 second cooldown
+        }
+        
         this.render();
+    }
+    
+    startCooldown(durationMs) {
+        this.isOnCooldown = true;
+        this.cooldownEndTime = Date.now() + durationMs;
+        
+        // Deselect any selected piece during cooldown
+        this.deselectPiece();
+        
+        // Clear any existing timer
+        if (this.cooldownTimer) {
+            clearTimeout(this.cooldownTimer);
+        }
+        
+        // Set timer to end cooldown
+        this.cooldownTimer = setTimeout(() => {
+            this.isOnCooldown = false;
+            this.cooldownEndTime = 0;
+            this.render(); // Re-render to remove cooldown visuals
+        }, durationMs);
+        
+        this.render();
+    }
+    
+    getRemainingCooldownMs() {
+        if (!this.isOnCooldown) return 0;
+        return Math.max(0, this.cooldownEndTime - Date.now());
+    }
+    
+    cleanup() {
+        // Clean up cooldown timer
+        if (this.cooldownTimer) {
+            clearTimeout(this.cooldownTimer);
+            this.cooldownTimer = null;
+        }
+        this.isOnCooldown = false;
+        this.cooldownEndTime = 0;
     }
     
     centerOnPlayerPieces() {
@@ -422,10 +475,15 @@ class GameBoard {
         // Draw pieces
         this.drawPieces();
         
-        // Draw selection and valid moves
-        if (this.selectedPiece) {
+        // Draw selection and valid moves (only if not on cooldown)
+        if (this.selectedPiece && !this.isOnCooldown) {
             this.drawSelection();
             this.drawValidMoves();
+        }
+        
+        // Draw cooldown overlay if active
+        if (this.isOnCooldown) {
+            this.drawCooldownOverlay();
         }
     }
     
@@ -510,5 +568,47 @@ class GameBoard {
             const pos = this.boardToScreen(move.x, move.y);
             this.ctx.fillRect(pos.x, pos.y, cellSize, cellSize);
         });
+    }
+    
+    drawCooldownOverlay() {
+        // Draw semi-transparent overlay
+        this.ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw cooldown message
+        const remainingSeconds = Math.ceil(this.getRemainingCooldownMs() / 1000);
+        const message = `Cooldown: ${remainingSeconds}s`;
+        
+        this.ctx.save();
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.font = 'bold 24px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        
+        // Draw background for text
+        const textWidth = this.ctx.measureText(message).width;
+        const padding = 20;
+        const bgWidth = textWidth + padding * 2;
+        const bgHeight = 40;
+        const bgX = (this.canvas.width - bgWidth) / 2;
+        const bgY = 50;
+        
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        this.ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+        
+        // Draw text
+        this.ctx.fillStyle = '#ff0000';
+        this.ctx.fillText(message, this.canvas.width / 2, bgY + bgHeight / 2);
+        
+        this.ctx.restore();
+        
+        // Schedule a re-render to update the countdown
+        if (this.isOnCooldown) {
+            setTimeout(() => {
+                if (this.isOnCooldown) {
+                    this.render();
+                }
+            }, 100); // Update every 100ms for smooth countdown
+        }
     }
 }
