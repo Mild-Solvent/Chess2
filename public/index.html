@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess 2 - Infinite Multiplayer Chess</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="screen">
+            <div class="loading-content">
+                <h1>Chess 2</h1>
+                <p>Infinite Multiplayer Chess</p>
+                <div class="spinner"></div>
+            </div>
+        </div>
+
+        <!-- Join Screen -->
+        <div id="join-screen" class="screen hidden">
+            <div class="join-content">
+                <h1>Chess 2</h1>
+                <p class="subtitle">Join the infinite chess battlefield</p>
+                
+                <div class="join-form">
+                    <input type="text" id="player-name" placeholder="Enter your name" maxlength="20" autocomplete="off">
+                    <button id="join-btn">Join Game</button>
+                </div>
+                
+                <div class="game-info">
+                    <div class="info-item">
+                        <span class="info-label">Max Players:</span>
+                        <span class="info-value">100</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Current Players:</span>
+                        <span class="info-value" id="current-players">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Game Screen -->
+        <div id="game-screen" class="screen hidden">
+            <!-- Game UI Header -->
+            <div id="game-header">
+                <div class="game-title">
+                    <h2>Chess 2</h2>
+                    <span id="player-info"></span>
+                </div>
+                
+                <div class="game-controls">
+                    <button id="center-board" title="Center on your pieces">🎯</button>
+                    <button id="toggle-minimap" title="Toggle minimap">🗺️</button>
+                    <button id="zoom-in" title="Zoom in">🔍+</button>
+                    <button id="zoom-out" title="Zoom out">🔍-</button>
+                    <button id="settings-btn" title="Settings">⚙️</button>
+                </div>
+            </div>
+
+            <!-- Main Game Area -->
+            <div id="game-container">
+                <!-- Chess Board -->
+                <div id="board-container">
+                    <canvas id="chess-board" width="800" height="600"></canvas>
+                    
+                    <!-- Board Coordinates Display -->
+                    <div id="coordinates-display">
+                        <span id="current-coords">(0, 0)</span>
+                    </div>
+                </div>
+
+                <!-- Minimap -->
+                <div id="minimap-container" class="hidden">
+                    <div id="minimap-header">
+                        <span>Minimap</span>
+                        <button id="close-minimap">×</button>
+                    </div>
+                    <canvas id="minimap" width="200" height="150"></canvas>
+                </div>
+
+                <!-- Side Panel -->
+                <div id="side-panel">
+                    <!-- Players List -->
+                    <div class="panel-section">
+                        <h3>Players <span id="players-count">(0)</span></h3>
+                        <div id="players-list" class="players-container">
+                            <!-- Players will be dynamically added here -->
+                        </div>
+                    </div>
+
+                    <!-- Game Info -->
+                    <div class="panel-section">
+                        <h3>Game Info</h3>
+                        <div class="game-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Your Color:</span>
+                                <span id="your-color" class="color-indicator"></span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Board Size:</span>
+                                <span id="board-size">Infinite</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Controls Help -->
+                    <div class="panel-section">
+                        <h3>Controls</h3>
+                        <div class="controls-help">
+                            <div class="control-item">
+                                <span class="control-key">Click & Drag</span>
+                                <span class="control-desc">Move board</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-key">Mouse Wheel</span>
+                                <span class="control-desc">Zoom</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-key">Click Piece</span>
+                                <span class="control-desc">Select/Move</span>
+                            </div>
+                            <div class="control-item">
+                                <span class="control-key">Space</span>
+                                <span class="control-desc">Center board</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile Controls -->
+            <div id="mobile-controls" class="mobile-only">
+                <div class="mobile-control-row">
+                    <button class="mobile-btn" id="mobile-zoom-out">-</button>
+                    <button class="mobile-btn" id="mobile-center">🎯</button>
+                    <button class="mobile-btn" id="mobile-zoom-in">+</button>
+                </div>
+                <div class="mobile-control-row">
+                    <button class="mobile-btn" id="mobile-minimap">Map</button>
+                    <button class="mobile-btn" id="mobile-players">Players</button>
+                    <button class="mobile-btn" id="mobile-help">Help</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Full Screen -->
+        <div id="game-full-screen" class="screen hidden">
+            <div class="error-content">
+                <h2>Game Full</h2>
+                <p>Sorry, the game is currently full (100 players max).</p>
+                <p>Please try again later.</p>
+                <button id="refresh-btn">Refresh</button>
+            </div>
+        </div>
+
+        <!-- Connection Error Screen -->
+        <div id="connection-error-screen" class="screen hidden">
+            <div class="error-content">
+                <h2>Connection Error</h2>
+                <p>Unable to connect to the game server.</p>
+                <p>Please check your internet connection and try again.</p>
+                <button id="retry-btn">Retry</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/board.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
