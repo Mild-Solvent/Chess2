@@ -140,6 +140,12 @@ class Chess2App {
                 this.gameBoard.startCooldown(data.remainingMs);
             }
         });
+        
+        this.socket.on('pawn-duplicated', (data) => {
+            if (this.gameBoard) {
+                this.gameBoard.handlePawnDuplicated(data);
+            }
+        });
 
         this.socket.on('board-section', (data) => {
             if (this.gameBoard) {

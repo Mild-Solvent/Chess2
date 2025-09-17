@@ -11,6 +11,7 @@ const io = socketIo(server);
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 100;
 const MOVE_COOLDOWN_MS = 3000; // 3 seconds cooldown between moves
+const PAWN_DUPLICATION_COOLDOWN_MS = 15000; // 15 seconds cooldown for pawn duplication
 
 // Game state
 const gameState = {
@@ -18,7 +19,8 @@ const gameState = {
     board: new Map(), // Infinite board using coordinate strings as keys
     playerColors: [],
     nextPlayerIndex: 0,
-    playerCooldowns: new Map() // Track last move time for each player
+    playerCooldowns: new Map(), // Track last move time for each player
+    pawnDuplicationCooldowns: new Map() // Track last pawn duplication time for each player
 };
 
 // Chess piece colors for up to 100 players
@@ -257,6 +259,82 @@ io.on('connection', (socket) => {
         });
         
         console.log(`${player.name} moved ${piece.type} from (${fromX},${fromY}) to (${toX},${toY})`);
+    });
+    
+    // Handle pawn duplication
+    socket.on('duplicate-pawn', (data) => {
+        const player = gameState.players.get(socket.playerId);
+        if (!player) return;
+        
+        const { fromX, fromY, toX, toY } = data;
+        const fromKey = `${fromX},${fromY}`;
+        const toKey = `${toX},${toY}`;
+        
+        const originalPiece = gameState.board.get(fromKey);
+        
+        // Validate duplication request
+        if (!originalPiece || originalPiece.playerId !== player.id) {
+            socket.emit('invalid-move', 'Not your piece');
+            return;
+        }
+        
+        if (originalPiece.type !== 'pawn') {
+            socket.emit('invalid-move', 'Only pawns can be duplicated');
+            return;
+        }
+        
+        // Check if target position is adjacent and empty
+        const dx = Math.abs(toX - fromX);
+        const dy = Math.abs(toY - fromY);
+        if (dx > 1 || dy > 1 || (dx === 0 && dy === 0)) {
+            socket.emit('invalid-move', 'Target must be an adjacent tile');
+            return;
+        }
+        
+        if (gameState.board.has(toKey)) {
+            socket.emit('invalid-move', 'Target position is occupied');
+            return;
+        }
+        
+        // Check pawn duplication cooldown (this is handled client-side for timing,
+        // but we still validate to prevent cheating)
+        const now = Date.now();
+        const lastDuplicationTime = gameState.pawnDuplicationCooldowns.get(player.id) || 0;
+        const timeSinceLastDuplication = now - lastDuplicationTime;
+        
+        // Allow some tolerance for network delay (500ms)
+        if (timeSinceLastDuplication < PAWN_DUPLICATION_COOLDOWN_MS - 500) {
+            const remainingCooldown = PAWN_DUPLICATION_COOLDOWN_MS - timeSinceLastDuplication;
+            socket.emit('move-on-cooldown', {
+                message: `You must wait ${Math.ceil(remainingCooldown / 1000)} seconds before duplicating another pawn`,
+                remainingMs: remainingCooldown
+            });
+            return;
+        }
+        
+        // Create duplicated pawn
+        const duplicatedPiece = {
+            type: 'pawn',
+            x: toX,
+            y: toY,
+            color: originalPiece.color,
+            playerId: player.id
+        };
+        
+        // Add duplicated pawn to board
+        gameState.board.set(toKey, duplicatedPiece);
+        
+        // Record the duplication time for cooldown tracking
+        gameState.pawnDuplicationCooldowns.set(player.id, now);
+        
+        // Broadcast pawn duplication to all players
+        io.emit('pawn-duplicated', {
+            playerId: player.id,
+            originalPiece: originalPiece,
+            duplicatedPiece: duplicatedPiece
+        });
+        
+        console.log(`${player.name} duplicated pawn from (${fromX},${fromY}) to (${toX},${toY})`);
     });
 
     // Handle getting board section

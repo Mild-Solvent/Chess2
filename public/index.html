@@ -70,6 +70,17 @@
                     <div id="coordinates-display">
                         <span id="current-coords">(0, 0)</span>
                     </div>
+                    
+                    <!-- Pawn Duplication Button -->
+                    <div id="pawn-actions" class="hidden">
+                        <button id="duplicate-pawn-btn" title="Duplicate pawn to adjacent tile (15s cooldown)">🐣 Duplicate</button>
+                        <div id="duplication-progress" class="hidden">
+                            <div class="progress-bar">
+                                <div id="duplication-progress-fill"></div>
+                            </div>
+                            <span id="duplication-timer">15s</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Minimap -->
