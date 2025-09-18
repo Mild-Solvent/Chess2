@@ -32,9 +32,7 @@ class GameBoard {
         this.cooldownTimer = null;
         
         // Pawn duplication state
-        this.isDuplicating = false;
-        this.duplicationEndTime = 0;
-        this.duplicationTimer = null;
+        this.duplicatingPawns = new Map(); // Track which pawns are duplicating
         this.selectedPawnForDuplication = null;
         
         // Chess piece symbols (Unicode)
@@ -155,20 +153,31 @@ class GameBoard {
                 if (window.chess2App) {
                     window.chess2App.showToast(`Wait ${remainingSeconds} seconds before making another move`, 'warning');
                 }
-            } else if (this.isDuplicating) {
-                // Show duplication message if trying to interact during duplication
-                const remainingSeconds = Math.ceil((this.duplicationEndTime - Date.now()) / 1000);
-                if (window.chess2App) {
-                    window.chess2App.showToast(`Pawn duplication in progress: ${Math.max(0, remainingSeconds)} seconds remaining`, 'warning');
-                }
             } else if (piece && piece.playerId === this.player.id) {
-                // Select own piece
-                this.selectPiece(piece, boardPos.x, boardPos.y);
+                // Check if this specific piece is duplicating
+                const pieceKey = `${boardPos.x},${boardPos.y}`;
+                const isPieceDuplicating = this.duplicatingPawns.has(pieceKey);
+                
+                if (isPieceDuplicating) {
+                    // Show duplication message for this specific pawn
+                    const duplicationData = this.duplicatingPawns.get(pieceKey);
+                    const remainingSeconds = Math.ceil((duplicationData.endTime - Date.now()) / 1000);
+                    if (window.chess2App) {
+                        window.chess2App.showToast(`This pawn is duplicating: ${Math.max(0, remainingSeconds)}s remaining`, 'warning');
+                    }
+                } else {
+                    // Select own piece (only if not duplicating)
+                    this.selectPiece(piece, boardPos.x, boardPos.y);
+                }
+            } else if (piece && piece.playerId !== this.player.id) {
+                // Clicked on enemy piece - hide pawn actions but don't select
+                this.hidePawnActions();
             } else if (this.selectedPiece) {
                 // Try to move selected piece
                 this.tryMovePiece(boardPos.x, boardPos.y);
             } else {
-                // Start dragging board
+                // Clicked on empty space or enemy piece - hide pawn actions and start dragging
+                this.hidePawnActions();
                 this.isDragging = true;
                 this.dragStartX = x;
                 this.dragStartY = y;
@@ -286,11 +295,17 @@ class GameBoard {
         this.selectedPiece = { piece, x, y };
         this.calculateValidMoves(piece, x, y);
         
-        // Show pawn duplication UI if a pawn is selected
-        if (piece.type === 'pawn' && !this.isOnCooldown && !this.isDuplicating) {
-            this.showPawnActions(piece, x, y);
-        } else {
-            this.hidePawnActions();
+        // Always hide pawn actions first
+        this.hidePawnActions();
+        
+        // Show pawn duplication UI ONLY if a pawn is selected and conditions are met
+        if (piece.type === 'pawn' && !this.isOnCooldown) {
+            const pawnKey = `${x},${y}`;
+            const isPawnDuplicating = this.duplicatingPawns.has(pawnKey);
+            
+            if (!isPawnDuplicating) {
+                this.showPawnActions(piece, x, y);
+            }
         }
         
         this.render();
@@ -448,13 +463,13 @@ class GameBoard {
         this.isOnCooldown = false;
         this.cooldownEndTime = 0;
         
-        // Clean up duplication timer
-        if (this.duplicationTimer) {
-            clearTimeout(this.duplicationTimer);
-            this.duplicationTimer = null;
-        }
-        this.isDuplicating = false;
-        this.duplicationEndTime = 0;
+        // Clean up all duplication timers
+        this.duplicatingPawns.forEach((duplicationData, pawnKey) => {
+            if (duplicationData.timer) {
+                clearTimeout(duplicationData.timer);
+            }
+        });
+        this.duplicatingPawns.clear();
         this.selectedPawnForDuplication = null;
         this.hidePawnActions();
     }
@@ -490,12 +505,19 @@ class GameBoard {
     }
     
     startPawnDuplication() {
-        if (!this.selectedPawnForDuplication || this.isDuplicating || this.isOnCooldown) {
+        if (!this.selectedPawnForDuplication || this.isOnCooldown) {
+            return;
+        }
+        
+        const { x, y, piece } = this.selectedPawnForDuplication;
+        const pawnKey = `${x},${y}`;
+        
+        // Check if this pawn is already duplicating
+        if (this.duplicatingPawns.has(pawnKey)) {
             return;
         }
         
         // Find available adjacent tiles
-        const { x, y } = this.selectedPawnForDuplication;
         const adjacentTiles = this.getAdjacentEmptyTiles(x, y);
         
         if (adjacentTiles.length === 0) {
@@ -503,9 +525,15 @@ class GameBoard {
             return;
         }
         
-        // Start duplication process
-        this.isDuplicating = true;
-        this.duplicationEndTime = Date.now() + 15000; // 15 seconds
+        // Start duplication process for this specific pawn
+        const duplicationData = {
+            endTime: Date.now() + 15000,
+            adjacentTiles: adjacentTiles,
+            pawnData: { piece, x, y },
+            timer: null
+        };
+        
+        this.duplicatingPawns.set(pawnKey, duplicationData);
         
         // Disable the duplicate button and show progress
         const duplicateBtn = document.getElementById('duplicate-pawn-btn');
@@ -521,12 +549,15 @@ class GameBoard {
         }
         
         // Start progress animation
-        this.updateDuplicationProgress();
+        this.updateDuplicationProgress(pawnKey);
         
         // Set timer to complete duplication
-        this.duplicationTimer = setTimeout(() => {
-            this.completePawnDuplication(adjacentTiles);
+        duplicationData.timer = setTimeout(() => {
+            this.completePawnDuplication(pawnKey);
         }, 15000);
+        
+        // Hide the pawn actions panel after starting duplication
+        this.hidePawnActions();
         
         this.render();
         window.chess2App.showToast('Pawn duplication started (15 seconds)', 'info');
@@ -552,10 +583,11 @@ class GameBoard {
         return adjacentTiles;
     }
     
-    updateDuplicationProgress() {
-        if (!this.isDuplicating) return;
+    updateDuplicationProgress(pawnKey) {
+        const duplicationData = this.duplicatingPawns.get(pawnKey);
+        if (!duplicationData) return;
         
-        const remainingTime = this.duplicationEndTime - Date.now();
+        const remainingTime = duplicationData.endTime - Date.now();
         const progress = Math.max(0, (15000 - remainingTime) / 15000 * 100);
         const seconds = Math.ceil(remainingTime / 1000);
         
@@ -570,20 +602,21 @@ class GameBoard {
             timerSpan.textContent = `${Math.max(0, seconds)}s`;
         }
         
-        if (remainingTime > 0) {
-            setTimeout(() => this.updateDuplicationProgress(), 100);
+        if (remainingTime > 0 && this.duplicatingPawns.has(pawnKey)) {
+            setTimeout(() => this.updateDuplicationProgress(pawnKey), 100);
         }
     }
     
-    completePawnDuplication(adjacentTiles) {
-        if (!this.selectedPawnForDuplication || adjacentTiles.length === 0) {
-            this.cancelPawnDuplication();
+    completePawnDuplication(pawnKey) {
+        const duplicationData = this.duplicatingPawns.get(pawnKey);
+        if (!duplicationData || duplicationData.adjacentTiles.length === 0) {
+            this.cancelPawnDuplication(pawnKey);
             return;
         }
         
         // Choose a random adjacent tile
-        const targetTile = adjacentTiles[Math.floor(Math.random() * adjacentTiles.length)];
-        const { piece, x: fromX, y: fromY } = this.selectedPawnForDuplication;
+        const targetTile = duplicationData.adjacentTiles[Math.floor(Math.random() * duplicationData.adjacentTiles.length)];
+        const { piece, x: fromX, y: fromY } = duplicationData.pawnData;
         
         // Send duplication request to server
         this.socket.emit('duplicate-pawn', {
@@ -593,38 +626,37 @@ class GameBoard {
             toY: targetTile.y
         });
         
-        // Reset duplication state
-        this.isDuplicating = false;
-        this.duplicationEndTime = 0;
-        this.duplicationTimer = null;
+        // Remove this pawn from duplicating state
+        this.duplicatingPawns.delete(pawnKey);
         
-        // Hide pawn actions and start normal cooldown
-        this.hidePawnActions();
+        // Start normal cooldown
         this.startCooldown(3000);
         
         window.chess2App.showToast('Pawn duplication completed!', 'success');
     }
     
-    cancelPawnDuplication() {
-        this.isDuplicating = false;
-        this.duplicationEndTime = 0;
-        
-        if (this.duplicationTimer) {
-            clearTimeout(this.duplicationTimer);
-            this.duplicationTimer = null;
+    cancelPawnDuplication(pawnKey) {
+        const duplicationData = this.duplicatingPawns.get(pawnKey);
+        if (duplicationData) {
+            if (duplicationData.timer) {
+                clearTimeout(duplicationData.timer);
+            }
+            this.duplicatingPawns.delete(pawnKey);
         }
         
-        // Reset UI
-        const duplicateBtn = document.getElementById('duplicate-pawn-btn');
-        const progressDiv = document.getElementById('duplication-progress');
-        
-        if (duplicateBtn) {
-            duplicateBtn.disabled = false;
-            duplicateBtn.textContent = '🐣 Duplicate';
-        }
-        
-        if (progressDiv) {
-            progressDiv.classList.add('hidden');
+        // Reset UI if no pawns are duplicating
+        if (this.duplicatingPawns.size === 0) {
+            const duplicateBtn = document.getElementById('duplicate-pawn-btn');
+            const progressDiv = document.getElementById('duplication-progress');
+            
+            if (duplicateBtn) {
+                duplicateBtn.disabled = false;
+                duplicateBtn.textContent = '🐣 Duplicate';
+            }
+            
+            if (progressDiv) {
+                progressDiv.classList.add('hidden');
+            }
         }
         
         this.render();
@@ -687,8 +719,8 @@ class GameBoard {
         // Draw pieces
         this.drawPieces();
         
-        // Draw selection and valid moves (only if not on cooldown or duplicating)
-        if (this.selectedPiece && !this.isOnCooldown && !this.isDuplicating) {
+        // Draw selection and valid moves (only if not on cooldown)
+        if (this.selectedPiece && !this.isOnCooldown) {
             this.drawSelection();
             this.drawValidMoves();
         }
@@ -698,10 +730,8 @@ class GameBoard {
             this.drawCooldownOverlay();
         }
         
-        // Draw duplication overlay if active
-        if (this.isDuplicating) {
-            this.drawDuplicationOverlay();
-        }
+        // Draw duplication indicators for individual pawns
+        this.drawDuplicatingPawns();
     }
     
     drawGrid() {
@@ -829,45 +859,65 @@ class GameBoard {
         }
     }
     
-    drawDuplicationOverlay() {
-        // Draw semi-transparent golden overlay
-        this.ctx.fillStyle = 'rgba(255, 215, 0, 0.1)';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    drawDuplicatingPawns() {
+        if (this.duplicatingPawns.size === 0) return;
         
-        // Draw duplication message
-        const remainingSeconds = Math.ceil((this.duplicationEndTime - Date.now()) / 1000);
-        const message = `Pawn Duplicating: ${Math.max(0, remainingSeconds)}s`;
+        const bounds = this.getVisibleBounds();
+        const cellSize = this.cellSize * this.zoom;
         
-        this.ctx.save();
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        this.ctx.font = 'bold 24px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
+        this.duplicatingPawns.forEach((duplicationData, pawnKey) => {
+            const [x, y] = pawnKey.split(',').map(Number);
+            
+            // Only draw if pawn is visible
+            if (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY) {
+                const pos = this.boardToScreen(x, y);
+                
+                // Draw golden pulsing border around duplicating pawn
+                const time = Date.now() / 500;
+                const alpha = 0.5 + 0.3 * Math.sin(time);
+                
+                this.ctx.save();
+                this.ctx.strokeStyle = `rgba(255, 215, 0, ${alpha})`;
+                this.ctx.lineWidth = 4;
+                this.ctx.strokeRect(pos.x - 2, pos.y - 2, cellSize + 4, cellSize + 4);
+                
+                // Draw progress indicator
+                const remainingTime = duplicationData.endTime - Date.now();
+                const progress = Math.max(0, (15000 - remainingTime) / 15000);
+                
+                // Draw progress bar above the pawn
+                const barWidth = cellSize * 0.8;
+                const barHeight = 4;
+                const barX = pos.x + (cellSize - barWidth) / 2;
+                const barY = pos.y - 8;
+                
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                this.ctx.fillRect(barX, barY, barWidth, barHeight);
+                
+                this.ctx.fillStyle = '#ffd700';
+                this.ctx.fillRect(barX, barY, barWidth * progress, barHeight);
+                
+                // Draw remaining time text
+                const remainingSeconds = Math.ceil(remainingTime / 1000);
+                if (remainingSeconds > 0) {
+                    this.ctx.fillStyle = '#ffd700';
+                    this.ctx.font = 'bold 12px Arial';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.textBaseline = 'bottom';
+                    this.ctx.fillText(`${remainingSeconds}s`, pos.x + cellSize / 2, barY - 2);
+                }
+                
+                this.ctx.restore();
+            }
+        });
         
-        // Draw background for text
-        const textWidth = this.ctx.measureText(message).width;
-        const padding = 20;
-        const bgWidth = textWidth + padding * 2;
-        const bgHeight = 40;
-        const bgX = (this.canvas.width - bgWidth) / 2;
-        const bgY = 100;
-        
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-        this.ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
-        
-        // Draw text
-        this.ctx.fillStyle = '#ffd700';
-        this.ctx.fillText(message, this.canvas.width / 2, bgY + bgHeight / 2);
-        
-        this.ctx.restore();
-        
-        // Schedule a re-render to update the countdown
-        if (this.isDuplicating) {
+        // Schedule a re-render to update the visual indicators
+        if (this.duplicatingPawns.size > 0) {
             setTimeout(() => {
-                if (this.isDuplicating) {
+                if (this.duplicatingPawns.size > 0) {
                     this.render();
                 }
-            }, 100); // Update every 100ms for smooth countdown
+            }, 100);
         }
     }
 }
