@@ -480,6 +480,9 @@ class GameBoard {
             pawnActionsDiv.classList.remove('hidden');
             this.selectedPawnForDuplication = { piece, x, y };
             
+            // Always reset button to fresh state when showing
+            this.resetDuplicationUI();
+            
             // Setup event listener for duplicate button
             const duplicateBtn = document.getElementById('duplicate-pawn-btn');
             if (duplicateBtn) {
@@ -497,10 +500,12 @@ class GameBoard {
         if (pawnActionsDiv) {
             pawnActionsDiv.classList.add('hidden');
         }
-        const progressDiv = document.getElementById('duplication-progress');
-        if (progressDiv) {
-            progressDiv.classList.add('hidden');
+        
+        // Only reset button state if no pawns are currently duplicating
+        if (this.duplicatingPawns.size === 0) {
+            this.resetDuplicationUI();
         }
+        
         this.selectedPawnForDuplication = null;
     }
     
@@ -629,10 +634,27 @@ class GameBoard {
         // Remove this pawn from duplicating state
         this.duplicatingPawns.delete(pawnKey);
         
+        // Reset the UI elements
+        this.resetDuplicationUI();
+        
         // Start normal cooldown
         this.startCooldown(3000);
         
         window.chess2App.showToast('Pawn duplication completed!', 'success');
+    }
+    
+    resetDuplicationUI() {
+        const duplicateBtn = document.getElementById('duplicate-pawn-btn');
+        const progressDiv = document.getElementById('duplication-progress');
+        
+        if (duplicateBtn) {
+            duplicateBtn.disabled = false;
+            duplicateBtn.textContent = '🐣 Duplicate';
+        }
+        
+        if (progressDiv) {
+            progressDiv.classList.add('hidden');
+        }
     }
     
     cancelPawnDuplication(pawnKey) {
@@ -646,17 +668,7 @@ class GameBoard {
         
         // Reset UI if no pawns are duplicating
         if (this.duplicatingPawns.size === 0) {
-            const duplicateBtn = document.getElementById('duplicate-pawn-btn');
-            const progressDiv = document.getElementById('duplication-progress');
-            
-            if (duplicateBtn) {
-                duplicateBtn.disabled = false;
-                duplicateBtn.textContent = '🐣 Duplicate';
-            }
-            
-            if (progressDiv) {
-                progressDiv.classList.add('hidden');
-            }
+            this.resetDuplicationUI();
         }
         
         this.render();
